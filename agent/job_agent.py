@@ -3,6 +3,7 @@ from typing import Literal
 
 from tavily import TavilyClient
 from langchain_openai import ChatOpenAI
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from deepagents import create_deep_agent, SubAgent
  
@@ -25,9 +26,29 @@ def internet_search(
     return search_docs
 
 
+# Initialize LinkedIn MCP client
+mcp_client = MultiServerMCPClient({
+    "linkedin_scraper": {
+        "url": "http://127.0.0.1:8000/mcp",
+        "transport": "stdio"
+    }
+})
+
+
+# Get LinkedIn tools from MCP client
+async def get_linkedin_tools():
+    return await mcp_client.get_tools()
+
+linkedin_tools = None  # Will be populated when get_linkedin_tools() is called
+linkedin_tools = get_linkedin_tools()
+
 sub_job_search_prompt = """You are a dedicated job search specialist. Your job is to find and analyze job opportunities based on the user's criteria.
 
 Conduct thorough job searches using the available tools and then reply to the user with detailed information about relevant job opportunities.
+
+You have access to multiple job search tools:
+- internet_search: For general web-based job searching across multiple platforms
+- linkedin_scraper: For specific LinkedIn job searching with advanced filtering
 
 When searching for jobs, consider:
 - Job title and role requirements
@@ -37,13 +58,15 @@ When searching for jobs, consider:
 - Salary ranges and benefits
 - Required skills and technologies
 
+Use LinkedIn tools for more targeted, professional job searches and company research. Use internet search for broader job market analysis and additional job boards.
+
 Only your FINAL answer will be passed on to the user. They will have NO knowledge of anything except your final message, so your final job search results should be comprehensive and actionable!"""
 
 job_search_sub_agent = {
     "name": "job-search-agent", 
     "description": "Used to search for specific job opportunities. Give this agent clear job search criteria including role, location, experience level, and any specific requirements. Focus on one type of role at a time for best results.",
     "prompt": sub_job_search_prompt,
-    "tools": ["internet_search"]
+    "tools": ["internet_search", linkedin_tools]
 }
 
 sub_career_advisor_prompt = """You are a dedicated career advisor. Your job is to review and enhance job search strategies and results.
@@ -175,6 +198,11 @@ You have access to tools for comprehensive job searching.
 ## `internet_search`
 
 Use this to run an internet search for job postings, company information, salary data, or career-related queries. You can specify the number of results, the topic, and whether raw content should be included. Use specific job-related search terms like "software engineer jobs San Francisco", "data scientist remote positions", "product manager salary NYC", etc.
+
+## `linkedin_scraper`
+
+Use this to search specifically for jobs on LinkedIn. This tool provides more targeted, professional job search results with LinkedIn's advanced filtering capabilities. You can specify query, location, company, and experience level parameters.
+
 """
 
 # Ensure OpenAI API key is set
