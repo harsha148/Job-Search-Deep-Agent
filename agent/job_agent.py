@@ -27,20 +27,32 @@ async def main():
         return search_docs
 
 
-    # Initialize LinkedIn MCP client
-    mcp_client = MultiServerMCPClient({
+    # Initialize MCP client with LinkedIn and Gmail servers
+    linkedin_mcp_client = MultiServerMCPClient({
         "linkedin_scraper": {
             "url": "http://127.0.0.1:8000/mcp",
             "transport": "streamable_http"
         }
     })
 
+    email_mcp_client = MultiServerMCPClient({
+        "gmail": {
+            "command": "npx",
+            "args": [
+                "@gongrzhe/server-gmail-autoauth-mcp"
+            ],
+            "transport": "stdio"
+        }
+    })
 
     # Get LinkedIn tools from MCP client
-    linkedin_tools = await mcp_client.get_tools()
+    linkedin_tools = await linkedin_mcp_client.get_tools()
+
+    email_tools = await email_mcp_client.get_tools()
     
     # Extract tool names for subagents (they expect tool names, not tool objects)
     linkedin_tool_names = [tool.name for tool in linkedin_tools]
+    email_tool_names = [tool.name for tool in email_tools]
 
     sub_job_search_prompt = """You are a dedicated job search specialist. Your job is to find and analyze job opportunities based on the user's criteria.
 
@@ -99,18 +111,64 @@ async def main():
         "tools": ["internet_search"]
     }
 
+    # Email mailing sub-agent for handling professional job application emails
+    mailing_agent_prompt = """You are a professional email specialist dedicated to crafting outstanding job application communications. Your mission is to help job seekers create compelling, professional emails that open doors to amazing career opportunities!
+
+    You have access to powerful email tools that allow you to compose and send professional communications directly. Your role is to be both a skilled communicator and an enthusiastic career advocate.
+
+    🌟 Your Capabilities:
+    - Draft exceptional cover letters and application emails
+    - Create compelling follow-up communications
+    - Compose professional thank you notes after interviews
+    - Write engaging networking emails to industry professionals
+    - Craft persuasive cold outreach messages to hiring managers and recruiters
+    - Design email templates for various job search scenarios
+
+    ✨ Email Excellence Standards:
+    - Always greet recipients with appropriate professional courtesy (Dear [Name], Hello [Name], etc.)
+    - Maintain a warm yet professional tone throughout
+    - Personalize content to the specific company, role, and recipient
+    - Keep communications clear, concise, and action-oriented
+    - Include relevant qualifications and achievements naturally
+    - Follow proper email etiquette and professional formatting
+    - Create compelling subject lines that get noticed
+    - End with professional closings and clear next steps
+
+    🚀 Motivational Approach:
+    Your communications should inspire confidence and enthusiasm! Help job seekers present their best selves while maintaining authenticity. Every email should reflect the candidate's passion, potential, and unique value proposition. Remember - you're not just writing emails, you're helping people advance their careers and achieve their dreams!
+
+    When using email tools, always confirm the email content and recipient details before sending. Your goal is to create communications that hiring managers will be excited to read and respond to positively.
+
+    Only your FINAL answer will be passed on to the user. They will have NO knowledge of anything except your final message, so provide comprehensive, ready-to-send email drafts and strategic communication guidance!"""
+
+    mailing_agent = {
+        "name": "mailing-agent",
+        "description": "Used for crafting and sending professional job application emails, follow-ups, thank you notes, and networking communications. This agent excels at creating personalized, compelling emails that motivate both senders and recipients in the job search process.",
+        "prompt": mailing_agent_prompt,
+        "tools": email_tool_names
+    }
+
 
     # Prompt prefix to steer the agent to be an expert job search assistant
-    job_search_instructions = """You are an expert job search assistant. Your job is to help users find relevant job opportunities and provide comprehensive career guidance.
+    job_search_instructions = """You are an expert job search assistant. Your job is to help users find relevant job opportunities and provide comprehensive career guidance, including professional email communication support.
 
     The first thing you should do is to write the user's job search criteria to `search_criteria.txt` so you have a clear record of their requirements.
 
-    Use the job-search-agent to find specific job opportunities. It will respond with detailed information about relevant positions based on the criteria you provide.
+    You have access to three specialized sub-agents:
+
+    1. **job-search-agent**: Use this to find specific job opportunities. It will respond with detailed information about relevant positions based on the criteria you provide.
+
+    2. **career-advisor-agent**: Use this to get advice on job search strategy, market analysis, and recommendations for improvement.
+
+    3. **mailing-agent**: Use this to craft and send professional job application emails, follow-ups, thank you notes, and networking communications. This agent specializes in creating compelling, personalized emails that motivate both senders and recipients.
 
     When you have enough job opportunities gathered, compile them into `job_search_results.md` with detailed information about each position.
 
     You can call the career-advisor-agent to get advice on the job search strategy, market analysis, and recommendations for improvement. After that (if needed) you can do more job searching and update the `job_search_results.md`
-    You can do this however many times you want until you are satisfied with the comprehensiveness of the results.
+
+    For any email communication needs (application emails, follow-ups, networking, etc.), use the mailing-agent to create professional, enthusiastic, and personalized communications.
+
+    You can use these agents as many times as needed until you are satisfied with the comprehensiveness of the results.
 
     Only edit the file once at a time (if you call this tool in parallel, there may be conflicts).
 
@@ -193,11 +251,19 @@ async def main():
     </Job Source Citation Rules>
     </job_search_results_instructions>
 
-    You have access to tools for comprehensive job searching.
+    You have access to tools for comprehensive job searching and professional email communication.
+
+    ## `internet_search`
+
+    Use this to run an internet search for job postings, company information, salary data, or career-related queries. You can specify the number of results, the topic, and whether raw content should be included. Use specific job-related search terms like "software engineer jobs San Francisco", "data scientist remote positions", "product manager salary NYC", etc.
 
     ## `linkedin_scraper`
 
     Use this to search specifically for jobs on LinkedIn. This tool provides more targeted, professional job search results with LinkedIn's advanced filtering capabilities. You can specify query, location, company, and experience level parameters.
+
+    ## `email tools`
+
+    Use these to handle professional email communications for job applications. You can draft compelling emails, send application messages, follow-up communications, thank you notes, and networking emails through the mailing-agent.
 
     """
 
@@ -207,9 +273,9 @@ async def main():
 
     # Create the job search agent
     agent = create_deep_agent(
-        tools = [internet_search] + linkedin_tools,
+        tools = [internet_search] + linkedin_tools + email_tools,
         instructions = job_search_instructions,
-        subagents=[career_advisor_sub_agent, job_search_sub_agent],
+        subagents=[career_advisor_sub_agent, job_search_sub_agent, mailing_agent],
         model="gpt-4o-mini",
     ).with_config({"recursion_limit": 1000})
     
